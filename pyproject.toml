@@ -1,7 +1,7 @@
 [project]
 name = "abstain-rag"
 version = "0.1.0"
-description = "Add your description here"
+description = "Benchmark of abstention methods for retrieval-augmented generation"
 readme = "README.md"
 authors = [
     { name = "Trivikram", email = "gsstrivikram18@gmail.com" }
@@ -29,3 +29,12 @@ dev = [
     "pytest>=9.2.0",
     "ruff>=0.17.6",
 ]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

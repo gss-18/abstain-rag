@@ -27,7 +27,7 @@ def check_embeddings() -> None:
     model = SentenceTransformer(EMBED_MODEL, device=device)
     docs = []
     with (ROOT / "data/beir/scifact/corpus.jsonl").open() as f:
-        for _, line in zip(range(500), f):
+        for _, line in zip(range(500), f, strict=False):
             d = json.loads(line)
             docs.append(f"{d['title']}. {d['text']}")
     t = time.perf_counter()

@@ -52,7 +52,7 @@ def fetch(client: httpx.Client, url: str) -> bytes:
 def write_jsonl(df: pd.DataFrame, cols: list[str], path: Path) -> None:
     with path.open("w") as f:
         for row in df[cols].itertuples(index=False):
-            f.write(json.dumps(dict(zip(cols, (str(v) for v in row)))) + "\n")
+            f.write(json.dumps(dict(zip(cols, (str(v) for v in row), strict=True))) + "\n")
 
 
 def download_beir(client: httpx.Client) -> None:
