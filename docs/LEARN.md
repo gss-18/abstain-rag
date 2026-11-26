@@ -277,3 +277,22 @@ are wrong. Questions found wrong are fixed or removed before CP3.
 2. Why near-miss questions at all? *Off-topic questions are easy to refuse; the real risk is plausible ones.*
 3. Why a section-level answer key, not passage-level? *A long section is several passages; any of them answers.*
 4. Why a human check of 100? *Generated labels are not ground truth until someone measures their error rate.*
+
+### Review results (`scripts/cp2_apply_review.py`, `runs/cp2/review_summary.json`)
+
+- **Answerable labels: 100/100 agree** with the human. With 0 errors in 100, the "rule of three" gives a
+  95% upper bound of ~3% on the label error rate.
+- **Question quality: 97/100 OK.** Removed: 2 questions with a misleading premise (e.g. "minimum value for the
+  FAR to apply", where $20,000 is really a labor-clause threshold) and 1 vague off-topic question.
+- **Final set: 719 questions.** Human labels live in `labels/far_review_100.csv` (committed; `data/` is not).
+
+**Findings from the reviewer's notes (used later):**
+
+1. **Passages start mid-sentence.** 250-word windows cut clauses. The section-level answer key is right, but in
+   CP4 the generator should see neighbouring passages of the same section, not one window.
+2. **False-premise questions exist** even in generated "answerable" sets. A good system answers by correcting
+   the premise. Worth a separate category later.
+3. **Near-misses share vocabulary with the FAR** (per diem, SAM registration, cost allowability), so they pull
+   real FAR hits. This is exactly where a score threshold alone fails.
+
+**Rule of three:** if you see 0 events in n trials, the 95% upper bound on the true rate is about 3/n.
