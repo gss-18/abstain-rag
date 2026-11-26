@@ -296,3 +296,87 @@ are wrong. Questions found wrong are fixed or removed before CP3.
    real FAR hits. This is exactly where a score threshold alone fails.
 
 **Rule of three:** if you see 0 events in n trials, the 95% upper bound on the true rate is about 3/n.
+
+---
+
+## CP3: Abstention gates
+
+**Goal:** decide *before* calling the LLM whether to answer or refuse, using only retrieval scores.
+
+### Signals (`gates.py`)
+
+| Signal | Meaning |
+|---|---|
+| `top1` | similarity of the best hit |
+| `margin` | `top1` minus the mean of hits 2-10: does the best hit stand out? |
+| `vocab` | share of the query's content words found in the corpus (words in >= 2 docs) |
+
+For FAR, passages are first collapsed to **one score per section** (`section_scores`), otherwise
+the margin is always tiny (neighbouring chunks of one section score alike).
+
+### Gates
+
+| # | Gate | Rule | Tuned how |
+|---|---|---|---|
+| 1 | no gate | always answer | - |
+| 2 | fixed threshold | `top1 >= t` | **one global t** on pooled dev data (0.710) |
+| 3 | calibrated floor | `top1 >= floor` | **per corpus**, from nonsense probes: 95th pct of word-salad probe scores, capped at the 10th pct of known-good dev queries. Needs **no labeled refusals**. |
+| 4 | floor + margin | floor AND `margin >= m` | m on dev |
+| 5 | floor + vocab | floor AND `vocab >= v` | v on dev |
+
+**Probe choice matters.** On FAR, median top-1: answerable 0.79, *word salad of FAR words* 0.66,
+near-miss 0.65, gibberish 0.60, off-topic 0.55. In-domain word salad looks "FAR-like" to the encoder, so it
+gives a realistic floor; gibberish would put the floor far too low.
+
+### Metrics (`abstention_metrics.py`)
+
+- **AUROC**: chance a random answerable query scores above a random unanswerable one (0.5 = coin flip).
+- **coverage**: share answered. **refusal precision**: of refusals, share that should be refused.
+  **refusal recall**: of unanswerable, share refused. **false-refusal rate**: answerable but refused.
+- **risk**: share of answers without support. For now "supported" = answerable AND the right doc is in the
+  top 5 (CP4 replaces this with the LLM judge on real answers).
+- **risk-coverage curve**: answer the most confident queries first; plot risk at each coverage.
+  **AURC** = area under it (lower = better). Each gate is one point on this plot.
+
+### Unanswerable sets
+
+- BEIR corpora: real queries from an unrelated dataset (FiQA finance vs SciFact/NFCorpus biomedical) plus
+  FAR off-topic questions; as many unanswerable as answerable.
+- FAR: CP2 near-miss and off-topic questions.
+- Thresholds tuned on **dev**, all numbers on **test**.
+
+```bash
+uv run python scripts/cp3_gates.py    # ~2 min with cached indexes -> runs/cp3/results.json, risk_coverage.png
+```
+
+### Results (test)
+
+| Corpus | AUROC top1 / margin / vocab | No gate risk | Best gate: coverage, risk, false refusals |
+|---|---|---|---|
+| SciFact | 0.998 / 0.83 / 0.80 | 0.68 | fixed: 0.39, 0.20, 7% |
+| FiQA | 0.978 / 0.55 / 0.76 | 0.71 | floor+vocab: 0.55, 0.48, 4% |
+| NFCorpus | 0.947 / 0.66 / 0.76 | 0.73 | floor: 0.38, 0.32, 16% (fixed: 33% false refusals) |
+| FAR | 0.985 / 0.84 / 0.81 | 0.58 | floor+margin: 0.54, 0.25, 5%; refuses 85% of near-misses, 100% off-topic |
+
+### What it means (honest reading)
+
+1. **top1 is by far the best signal.** Margin and vocab add almost nothing once a floor exists; on 3 of 4
+   corpora the dev-tuned m and v chose not to cut at all. Margin helps a little on FAR only.
+2. **Per-corpus calibration matters.** The global threshold looks fine on 3 corpora but falsely refuses
+   **33%** of answerable NFCorpus questions; the calibrated floor halves that (16%) without labeled refusals.
+3. **Cross-domain unanswerables are easy** (AUROC ~0.95-1.0). The real test is FAR near-misses:
+   **~15% still get through** - plausible contracting questions on topics the FAR does not cover.
+4. **Remaining risk is mostly retrieval misses, not unanswerable questions.** On FiQA only 59% of answerable
+   questions have the right doc in the top 5, so risk stays ~0.48 even with good refusals. Gates cannot fix
+   that; better retrieval (CP5 fine-tuning) can.
+5. Gates cost **< 0.1 ms per query**: abstention before generation is nearly free.
+
+### Check yourself
+
+1. Why tune on dev and report on test? *Otherwise thresholds are fit to the test answers (leakage).*
+2. Why can the calibrated floor be set without labeled unanswerable questions? *It uses nonsense probes and
+   known-good queries only.*
+3. AUROC 0.98 but risk 0.48 on FiQA - how? *AUROC measures answerable vs unanswerable; risk also counts
+   answerable questions whose right doc was not retrieved.*
+4. Why collapse FAR passages to sections before computing the margin? *Chunks of one section score alike, so
+   the passage-level margin is near zero for every query.*
