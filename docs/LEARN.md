@@ -215,3 +215,65 @@ cutoff will struggle; this motivates the margin and calibrated-floor gates.
 2. Why 250-word chunks? *bge truncates past ~380 words; the rest would be invisible.*
 3. Why does `search` return scores? *The abstention gates decide from them.*
 4. Why reproduce published numbers before anything else? *If the baseline is wrong, every later result is wrong too.*
+
+---
+
+## CP2: FAR test set
+
+**Problem:** BEIR ships questions and an answer key; the FAR does not. We build both, plus questions the
+system *should refuse*.
+
+### Question types
+
+| Type | How it is made | Should the system answer? |
+|---|---|---|
+| `answerable` | llama3.1 reads one FAR passage and writes a question it answers; that passage's **section** is the answer key | Yes |
+| `near_miss` | Contracting-flavoured topics the FAR does not cover (DFARS, grants under 2 CFR 200, Georgia state rules, SAM.gov login help, per diem rates, ...) | No |
+| `ood_llm` | Everyday off-topic questions (cooking, sports, travel, ...) | No |
+| `ood_beir` | Real science/medical queries from SciFact and NFCorpus | No |
+
+Near-misses are the hard, honest case: they *sound* like FAR questions, so retrieval returns
+confident-looking hits.
+
+### Code
+
+- **`llm.py` (`Ollama`)**: POST to `/api/generate` with
+  - `format` = a **JSON schema** (constrained decoding: the reply must parse). `minItems`/`maxItems` force list
+    length; without them llama3.1 returned 1 question when asked for 5.
+  - a fixed `seed` per item -> reproducible; `temperature` 0.7-0.8 for variety.
+  - a **disk cache** (`data/far/llm_cache.jsonl`) keyed by a hash of the request: reruns are free.
+- **`testset.py`** (pure functions, all tested):
+  - `sample_passages`: one passage per section, uniform over sections, passages >= 60 words.
+  - `reject_reason`: drops questions that are too short/long, not a question, cite a section number or
+    say "this section", or **copy > 6 consecutive words** from the passage (copied wording makes retrieval
+    artificially easy).
+  - `near_duplicates`: drop questions with cosine > 0.95 to an earlier one.
+  - `split_dev_test`: 30% dev / 70% test, stratified by type. **dev** tunes gate thresholds (CP3), **test** is
+    for final numbers only.
+- **`scripts/cp2_build_testset.py`**: generates, filters, splits, writes `testset.jsonl`, section-level
+  `qrels/{dev,test}.tsv`, a retrieval sanity check, and `review.csv`.
+
+```bash
+uv run python scripts/cp2_build_testset.py --limit 6   # quick prompt check first
+uv run python scripts/cp2_build_testset.py             # full run, ~25 min
+```
+
+### Results
+
+- Generated 384 answerable, 178 near-miss, 83 + 80 off-topic. Rejected: 16 answerable copied the passage,
+  13 off-topic were not questions. 3 near-duplicates dropped. **722 questions total.**
+- Retrieval on answerable questions: **source section at rank 1: 53.9%, in top 10: 86.5%.**
+  Harder than SciFact because FAR has many near-identical sections (e.g. a policy section and its clause).
+
+### Human review (`data/far/review.csv`)
+
+100 questions (50 answerable, 30 near-miss, 20 off-topic), labeled by hand:
+`label_answerable_by_far (Y/N)` and `label_question_ok (Y/N)`. This measures how often the generated labels
+are wrong. Questions found wrong are fixed or removed before CP3.
+
+### Check yourself
+
+1. Why reject questions that copy the passage? *Word overlap makes retrieval look better than it is.*
+2. Why near-miss questions at all? *Off-topic questions are easy to refuse; the real risk is plausible ones.*
+3. Why a section-level answer key, not passage-level? *A long section is several passages; any of them answers.*
+4. Why a human check of 100? *Generated labels are not ground truth until someone measures their error rate.*
