@@ -380,3 +380,106 @@ uv run python scripts/cp3_gates.py    # ~2 min with cached indexes -> runs/cp3/r
    answerable questions whose right doc was not retrieved.*
 4. Why collapse FAR passages to sections before computing the margin? *Chunks of one section score alike, so
    the passage-level margin is near zero for every query.*
+
+## CP4: Generated answers, LLM self-refusal, and checking the judge
+
+**Goal:** generate real answers, add the LLM's own "I don't know" as gate 6, and measure end-to-end how often
+answers are wrong, with a judge that has itself been checked against a human.
+
+### What runs (`scripts/cp4_generate.py`)
+
+| Stage | What it does |
+|---|---|
+| generate | `llama3.1:8b` writes two answers per question from the top 5 sources: **always answer** (used by gates 1-5) and **answer or refuse** with an exact refusal sentence (gate 6) |
+| judge | `qwen2.5:7b` (a different model family) marks every non-refusal answer: **grounded** in the sources? **answers the question**? |
+| review | 40 judged answers (10 per corpus, half judged grounded, half not) to a sheet for a human, judge verdicts hidden |
+| report | metrics per corpus and gate, human-weighted hallucination rates, risk-coverage plot |
+
+1,103 test questions x 2 answers = 2,206 generations, plus 1,103 judge calls. Every call is cached on disk
+(keyed by a hash of the request), so a stopped run resumes where it left off. 3 parallel requests
+(`OLLAMA_NUM_PARALLEL=3`) took it from ~9 to ~12 answers per minute on a 16 GB Mac.
+
+**New gates:** 6 = the LLM refuses by itself; **3+6** = calibrated floor first, then the LLM may still refuse.
+A refusal is detected from the **first sentence only** (`is_refusal`), because the "always" prompt still
+refuses in its own words and long answers often mention "not stated" somewhere in the middle.
+
+### Step 1: check the judge before trusting it
+
+The user labeled the 40 review answers by hand. Agreement with the human:
+
+| Judge | Grounded | Answers question |
+|---|---|---|
+| qwen2.5:7b, short prompt (used in the run) | **45%** | 75% |
+| qwen2.5:7b, claim-by-claim prompt | 50% | 72% |
+| qwen2.5:14b, claim-by-claim prompt | 60% | 57% |
+| Claude, blind agent with the same instructions | 72.5% | 80% |
+
+(`scripts/cp4_judge_check.py`; Claude's labels in `labels/cp4_reference_claude_40.csv`.)
+
+- **No local judge comes close to the 85% target.** The 7B judge is a coin flip on grounding.
+- Two error types: it calls refusals "not grounded" (a refusal makes no false claim), and it misses
+  **subtle overclaims** - "essential" where the source says "enhances", a hazard ratio from the wrong row,
+  the wrong FAR paragraph. The 14B fixes the first and is *more* lenient on the second (it passed 12 of the
+  16 answers the human failed).
+- Even a strong model agrees with the human only ~3 times in 4: grounding is a hard, partly subjective call.
+
+**Decision:** judge-based hallucination numbers are **not reported as results**. Headline hallucination rates
+come from the 40 human labels; judge numbers below are a rough comparison only.
+
+### Step 2: hallucination rate from human labels
+
+The sample was drawn per corpus and per judge verdict, so each labeled answer stands for N/n answers of its
+group (weighted ratio estimate; 95% interval from a stratified bootstrap, `human_rate`).
+
+| System (always-answer prompt) | Answers with an unsupported claim | 95% interval | Labeled answers used |
+|---|---|---|---|
+| No gate | **47%** | 27% - 66% | 40 |
+| Calibrated floor (gate 3) | **44%** | 21% - 66% | 28 |
+
+- **Gates decide *whether* to answer; they do not make the answers that pass more faithful.** About half of
+  the 8B model's answers contain at least one claim the sources do not support, gated or not.
+- The intervals are wide (40 labels). The honest claim is "roughly half", not a precise number.
+
+### Step 3: refusals and cost (no judge needed)
+
+Coverage and refusal recall use only the answerable/unanswerable labels and the refusal detector, so they do
+not depend on the judge. FAR test set (CP2):
+
+| Gate | Coverage | Refusal recall | Refusal precision | LLM seconds per query |
+|---|---|---|---|---|
+| 1 no gate | 0.67 | 0.70 | 0.99 | 14.7 |
+| 3 calibrated floor | 0.54 | 0.95 | 0.95 | 7.7 |
+| 6 LLM self-refusal | 0.57 | 0.89 | 0.98 | 7.3 |
+| **3+6 floor, then LLM** | **0.52** | **0.97** | 0.94 | **5.4** |
+
+- Even with no gate the "always answer" model refuses 70% of unanswerable FAR questions on its own words;
+  the floor lifts that to 95% and **halves LLM time** because refused questions never reach the model.
+- Stacking the floor and self-refusal refuses the most unanswerable questions (97%) at the lowest cost.
+- BEIR corpora show the same pattern (`runs/cp4/results.json`).
+
+```bash
+uv run python scripts/cp4_generate.py --stage llm      # generate + judge, ~3 h first time (cached after)
+uv run python scripts/cp4_generate.py --stage review   # sheet for the human
+uv run python scripts/cp4_generate.py --stage report   # needs labels/cp4_judge_review_40.csv
+uv run python scripts/cp4_judge_check.py qwen2.5:14b   # re-test a judge against the human labels
+```
+
+### What it means (honest reading)
+
+1. **Test the evaluator first.** An unchecked 7B judge would have produced confident hallucination rates
+   that were no better than chance on grounding.
+2. **Abstention gates and faithfulness are different problems.** Gates cut wrong answers to unanswerable
+   questions and save compute; they do nothing for unsupported claims inside answers to good questions.
+   That needs a stronger generator, citation checks, or claim-level verification.
+3. **A floor before generation is the cheapest win:** 95% refusal recall and half the LLM time.
+
+### Check yourself
+
+1. Why judge with a different model family from the generator? *A model tends to approve its own style of
+   mistakes.*
+2. Why weight the labeled answers instead of averaging them? *The sample was half judge-yes, half judge-no,
+   which is not the real mix; weighting by N/n restores it.*
+3. Why are coverage and refusal recall trustworthy when the judge is not? *They need only the question's
+   label and whether the answer refused, no judgment of the answer's content.*
+4. Why did the model-filled label sheet have to be thrown away? *The check asks whether the judge agrees with
+   a person; model labels turn it into model-vs-model.*
