@@ -481,5 +481,3 @@ uv run python scripts/cp4_judge_check.py qwen2.5:14b   # re-test a judge against
    which is not the real mix; weighting by N/n restores it.*
 3. Why are coverage and refusal recall trustworthy when the judge is not? *They need only the question's
    label and whether the answer refused, no judgment of the answer's content.*
-4. Why did the model-filled label sheet have to be thrown away? *The check asks whether the judge agrees with
-   a person; model labels turn it into model-vs-model.*
