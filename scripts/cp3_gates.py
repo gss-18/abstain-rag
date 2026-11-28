@@ -13,7 +13,6 @@ Usage: uv run python scripts/cp3_gates.py
 from __future__ import annotations
 
 import json
-import random
 import time
 from pathlib import Path
 
@@ -24,13 +23,13 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 from abstain_rag.abstention_metrics import aurc, auroc, decision_metrics, risk_coverage  # noqa: E402
-from abstain_rag.beir import doc_text, load_corpus, load_qrels, load_queries  # noqa: E402
+from abstain_rag.beir import doc_text, load_corpus  # noqa: E402
+from abstain_rag.evalsets import BEIR, all_items, retrieve_units  # noqa: E402
 from abstain_rag.gates import (  # noqa: E402
     GateParams,
     Vocabulary,
     calibrate_floor,
     decide,
-    section_scores,
     signals,
     tune_threshold,
     word_salad_probes,
@@ -40,39 +39,8 @@ from abstain_rag.retrieval import DenseRetriever  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 OUT = ROOT / "runs" / "cp3"
-BEIR = ["scifact", "fiqa", "nfcorpus"]
-DEV_SPLIT = {"scifact": "train", "fiqa": "dev", "nfcorpus": "dev"}  # SciFact has no dev split
-UNRELATED = {"scifact": ["fiqa"], "nfcorpus": ["fiqa"], "fiqa": ["scifact", "nfcorpus"]}
 SIGNALS = ["top1", "margin", "vocab"]
 TOP_K_CORRECT = 5
-
-
-def far_items() -> list[dict]:
-    items = [json.loads(line) for line in (DATA / "far" / "testset.jsonl").open()]
-    return [{"question": it["question"], "answerable": it["answerable"], "split": it["split"], "type": it["type"],
-             "relevant": {it["section"]} if it["answerable"] else set()} for it in items]
-
-
-def beir_items(name: str, ood_llm: list[dict], max_dev: int = 300, seed: int = 42) -> list[dict]:
-    rng = random.Random(seed)
-    folder = DATA / "beir" / name
-    queries = load_queries(folder)
-    items = []
-    for split, qsplit in [("dev", DEV_SPLIT[name]), ("test", "test")]:
-        qrels = load_qrels(folder, qsplit)
-        qids = sorted(q for q in qrels if q in queries)
-        if split == "dev" and len(qids) > max_dev:
-            qids = rng.sample(qids, max_dev)
-        items += [{"question": queries[q], "answerable": True, "split": split, "type": "answerable",
-                   "relevant": set(qrels[q])} for q in qids]
-    n_ans = len(items)
-    pool = [t for other in UNRELATED[name] for t in load_queries(DATA / "beir" / other).values()]
-    cross = rng.sample(pool, n_ans - len(ood_llm))
-    n_dev = round(len(cross) * 0.3)
-    items += [{"question": q, "answerable": False, "split": "dev" if k < n_dev else "test", "type": "unrelated_beir",
-               "relevant": set()} for k, q in enumerate(cross)]
-    items += [{**it, "relevant": set()} for it in ood_llm]
-    return items
 
 
 def run_corpus(name: str, items: list[dict], retriever: DenseRetriever, corpus: dict) -> dict:
@@ -81,14 +49,8 @@ def run_corpus(name: str, items: list[dict], retriever: DenseRetriever, corpus: 
     vocab = Vocabulary(texts)
 
     def retrieve(questions: list[str]) -> tuple[list[np.ndarray], list[list[str]]]:
-        scores, ranked = retriever.search(questions, k=50)
-        if not is_far:
-            return list(scores), ranked
-        out_s, out_r = [], []
-        for s, r in zip(scores, ranked, strict=True):  # passages -> sections, best passage per section
-            out_s.append(section_scores(s, r))
-            out_r.append(list(dict.fromkeys(pid.split("#")[0] for pid in r)))
-        return out_s, out_r
+        scores, ranked, _ = retrieve_units(retriever, questions, is_far)
+        return scores, ranked
 
     t = time.perf_counter()
     scores, ranked = retrieve([it["question"] for it in items])
@@ -111,15 +73,14 @@ def run_corpus(name: str, items: list[dict], retriever: DenseRetriever, corpus: 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     retriever = DenseRetriever()
-    far = far_items()
-    ood_llm = [it for it in far if it["type"] == "ood_llm"]
+    sets = all_items(DATA)
     runs = {}
     for name in BEIR + ["far"]:
         folder = DATA / ("far" if name == "far" else f"beir/{name}")
         corpus = load_corpus(folder)
         ids = list(corpus)
         retriever.build(ids, [doc_text(corpus[i]) for i in ids], cache_dir=DATA / "index" / name)
-        items = far if name == "far" else beir_items(name, ood_llm)
+        items = sets[name]
         runs[name] = run_corpus(name, items, retriever, corpus)
         print(f"[{name}] {len(items)} queries ({int(runs[name]['answerable'].sum())} answerable)")
 
