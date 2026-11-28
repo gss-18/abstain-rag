@@ -68,7 +68,7 @@ def held_out_sections() -> set[str]:
 
 def stage_questions(workers: int) -> None:
     corpus = load_corpus(FAR)
-    passages = [{"_id": i, **corpus[i]} for i in corpus]
+    passages = [{"_id": i, "section": i.split("#")[0], **corpus[i]} for i in corpus]
     chosen = training_passages(passages, held_out_sections())
     llm = Ollama(GENERATOR, cache_path=DATA / "cache" / "cp5_questions.jsonl")
 
