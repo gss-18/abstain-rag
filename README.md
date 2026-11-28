@@ -4,6 +4,13 @@ A benchmark of **abstention** for retrieval-augmented generation: when should a 
 answering? Built on the US **Federal Acquisition Regulation (FAR)** plus three public BEIR datasets, with free
 local models only (bge-small for retrieval, llama3.1:8b for answers, qwen2.5 as a judge).
 
+[![ci](https://github.com/gss-18/abstain-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/gss-18/abstain-rag/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
+![Ollama](https://img.shields.io/badge/LLM-Ollama%20(local)-1f2328)
+![Ruff](https://img.shields.io/badge/lint-ruff-261230)
+[![release](https://img.shields.io/github/v/release/gss-18/abstain-rag)](https://github.com/gss-18/abstain-rag/releases)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 ![Gate results on the FAR test set](docs/img/far_gates.png)
 
 ## Results
@@ -101,6 +108,19 @@ Step-by-step explanations and self-check questions: [docs/LEARN.md](docs/LEARN.m
 - One generator (llama3.1:8b). A stronger model would change the faithfulness numbers, not the gate results.
 - CP5 training and test questions come from the same LLM and prompt; part of the fine-tuning gain may be style.
 - The refusal detector reads only the first sentence of an answer.
+
+## Related
+
+[rfp-agent](https://github.com/gss-18/rfp-agent) uses this project's FAR retriever and calibrated gates as an
+MCP tool that refuses questions the FAR does not cover.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE) © 2026 Trivikram Sridevi
 
 ## Data
 

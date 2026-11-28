@@ -1,10 +1,19 @@
 [project]
 name = "abstain-rag"
-version = "0.1.0"
-description = "Benchmark of abstention methods for retrieval-augmented generation"
+version = "1.0.0"
+description = "Benchmark of abstention for retrieval-augmented generation: when should a RAG system refuse?"
 readme = "README.md"
 authors = [
-    { name = "Trivikram", email = "gsstrivikram18@gmail.com" }
+    { name = "Trivikram Sridevi", email = "gsstrivikram18@gmail.com" }
+]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["rag", "retrieval", "abstention", "llm-evaluation", "llm-as-judge", "faiss", "embeddings", "far"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 requires-python = ">=3.12"
 dependencies = [
@@ -20,6 +29,11 @@ dependencies = [
     "sentence-transformers>=6.3.0",
     "tqdm>=4.70.1",
 ]
+
+[project.urls]
+Repository = "https://github.com/gss-18/abstain-rag"
+Issues = "https://github.com/gss-18/abstain-rag/issues"
+Changelog = "https://github.com/gss-18/abstain-rag/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["uv_build>=0.10.9,<0.11.0"]
