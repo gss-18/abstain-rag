@@ -58,8 +58,8 @@ def contrastive_loss(q: torch.Tensor, p: torch.Tensor, scale: float = 20.0) -> t
 
 
 def embed(model: SentenceTransformer, texts: list[str]) -> torch.Tensor:
-    features = model.tokenize(texts)
-    features = {k: v.to(model.device) for k, v in features.items()}
+    features = getattr(model, "preprocess", model.tokenize)(texts)  # preprocess() in sentence-transformers 6+
+    features = {k: v.to(model.device) for k, v in features.items() if hasattr(v, "to")}  # skip non-tensor fields
     return F.normalize(model(features)["sentence_embedding"], dim=-1)
 
 

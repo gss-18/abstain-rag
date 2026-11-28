@@ -18,7 +18,8 @@ local models only (bge-small for retrieval, llama3.1:8b for answers, qwen2.5 as 
 > **About half of the 8B model's answers contain an unsupported claim** (47%, 95% interval 27-66%), with or
 > without a gate. Gates decide *whether* to answer; they do not make answers more faithful.
 
-<!-- CP5 -->
+> **Fine-tuning on the FAR lifted retrieval (nDCG@10 0.712 → 0.757) but shifted every score**: the old refusal
+> threshold would have refused 55% of answerable questions. The label-free floor recalibrated itself (4.5%).
 
 ## What is in it
 
@@ -28,7 +29,7 @@ local models only (bge-small for retrieval, llama3.1:8b for answers, qwen2.5 as 
 | CP2 FAR test set | 719 questions written by an LLM from FAR passages (answerable, near-miss, off-topic), filtered, then 100 reviewed by hand | source section in top 10 for 86.5% |
 | CP3 gates | 5 refusal gates from retrieval scores alone: fixed threshold, calibrated floor, + margin, + vocabulary | top-1 score AUROC 0.985 on FAR |
 | CP4 generation | answers, the LLM's own refusal (gate 6), floor + LLM stacked, judge checked against 40 human labels | stacked gate refuses 97% of unanswerable at 5.4 s/question |
-| CP5 fine-tuning | bge-small fine-tuned on FAR with synthetic questions from sections the test never uses | see below |
+| CP5 fine-tuning | bge-small fine-tuned on FAR with 2,009 synthetic questions from sections the test never uses | nDCG@10 0.712 → 0.757; right section in top 5: 80% → 84% |
 
 ### The FAR gates (test set, 503 questions)
 
@@ -54,6 +55,19 @@ no judge: only the question's label and whether the answer refused.
 
 The local judges miss subtle overclaims: "essential" where the source says "enhances", a hazard ratio from the
 wrong row, the wrong FAR paragraph.
+
+### Fine-tuning (CP5, FAR test set)
+
+| | Base bge-small | Fine-tuned |
+|---|---|---|
+| nDCG@10 | 0.712 | **0.757** |
+| Right section in top 5 | 79.8% | **84.3%** |
+| Calibrated floor | 0.711 | 0.541 |
+| Answerable refused, floor recalibrated | 4.1% | 4.5% |
+| Answerable refused, old floor kept | - | **55.1%** |
+
+Retrieval gets better; telling answerable from unanswerable does not (AUROC 0.985 vs 0.984). The score scale
+moves, so every fixed threshold must be recalibrated after fine-tuning.
 
 ## How the calibrated floor works
 
@@ -85,6 +99,7 @@ Step-by-step explanations and self-check questions: [docs/LEARN.md](docs/LEARN.m
 - FAR questions are written by an LLM (then filtered and spot-checked by hand), not collected from real users.
 - 40 human labels give wide intervals on hallucination rates; read them as "roughly half".
 - One generator (llama3.1:8b). A stronger model would change the faithfulness numbers, not the gate results.
+- CP5 training and test questions come from the same LLM and prompt; part of the fine-tuning gain may be style.
 - The refusal detector reads only the first sentence of an answer.
 
 ## Data

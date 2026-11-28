@@ -482,3 +482,66 @@ uv run python scripts/cp4_judge_check.py qwen2.5:14b   # re-test a judge against
    which is not the real mix; weighting by N/n restores it.*
 3. Why are coverage and refusal recall trustworthy when the judge is not? *They need only the question's
    label and whether the answer refused, no judgment of the answer's content.*
+
+## CP5: Fine-tuning the retriever on the FAR
+
+**Goal:** make bge-small better at the FAR without labeled data, and check what fine-tuning does to the
+refusal gates.
+
+### How (`scripts/cp5_finetune.py`, `src/abstain_rag/finetune.py`)
+
+1. **Training questions.** `llama3.1:8b` writes one search question for one passage per FAR section (same prompt
+   and filters as CP2). Every section used by a dev or test question is **held out**, so the model never sees a
+   test section in training. 2,084 sections → 2,009 questions kept.
+2. **Loss.** Multiple-negatives ranking loss: in a batch of 32 (question, passage) pairs, each question must
+   score its own passage above the other 31. Batches never hold two passages from the same section, which would
+   be false negatives.
+3. **Training.** Plain PyTorch loop, AdamW, lr 2e-5, warmup 10%, up to 3 epochs; the epoch with the best **dev**
+   nDCG@10 is kept (epoch 1). Training passages are cut to 256 tokens to fit in GPU memory on a 16 GB Mac next to
+   Ollama; evaluation uses 512 like the base model.
+4. **Evaluation.** Base vs fine-tuned on the FAR **test** set. The calibrated floor is recomputed for each model
+   from its own nonsense probes.
+
+```bash
+uv run python scripts/cp5_finetune.py --stage questions --workers 3   # ~1.5 h, cached
+uv run python scripts/cp5_finetune.py --stage train                   # ~7 min on MPS
+uv run python scripts/cp5_finetune.py --stage eval                    # -> runs/cp5/results.json
+```
+
+### Results (FAR test set)
+
+| | Base | Fine-tuned |
+|---|---|---|
+| nDCG@10 | 0.712 | **0.757** |
+| recall@100 | 0.974 | 0.985 |
+| Right section in top 5 | 79.8% | **84.3%** |
+| AUROC of top-1 (answerable vs not) | 0.985 | 0.984 |
+| Calibrated floor | 0.711 | **0.541** |
+| Floor gate: unanswerable refused | 91.1% | 90.2% |
+| Floor gate: answerable refused | 4.1% | 4.5% |
+| Floor gate: answers with the wrong section in top 5 (risk) | 26.4% | **21.6%** |
+
+**The trap:** fine-tuning moved every score down (the floor fell from 0.711 to 0.541). Keeping the old
+threshold would have refused **55% of answerable questions** (and 100% of unanswerable ones). The probe-based
+floor needs no labels, so it recalibrated itself and kept false refusals at 4.5%.
+
+### What it means (honest reading)
+
+1. **Retrieval improves; refusal does not.** Fine-tuning finds the right section more often (+4.5 nDCG points,
+   +4.5 points in the top 5), so fewer answers are built on the wrong section. Separating answerable from
+   unanswerable questions was already near its ceiling (AUROC 0.985) and stays there.
+2. **Any threshold is tied to one model.** Swap or fine-tune the encoder and every fixed score threshold is
+   wrong. A calibration method that needs no labels is what makes retraining safe. (rfp-agent hard-codes the
+   base model's 0.711; it must be recalibrated before using the fine-tuned model.)
+3. **Caveat:** training and test questions were written by the same model with the same prompt, so part of the
+   gain may be learning that style. Real user questions would be the stronger test.
+
+### Check yourself
+
+1. Why hold out every dev/test section from training? *Otherwise the model memorises the test passages and the
+   gain is leakage, not learning.*
+2. Why choose the epoch on dev, not test? *Picking on test would fit the test set.*
+3. Why did the floor drop after fine-tuning? *Contrastive training spreads embeddings out, which lowers typical
+   cosine scores; the ranking improves while the absolute scale shifts.*
+4. Why are two passages from one section in a batch a problem? *Each is treated as a wrong answer for the other's
+   question, though both are relevant.*

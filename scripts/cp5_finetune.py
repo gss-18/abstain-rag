@@ -44,6 +44,7 @@ OUT = ROOT / "runs" / "cp5"
 MODEL_DIR = ROOT / "models" / "bge-small-far"
 QUESTIONS = DATA / "cp5_train_questions.jsonl"
 GENERATOR = "llama3.1:8b"
+TRAIN_MAX_TOKENS = 256  # FAR chunks are ~250 words; 512-token training ran out of GPU memory next to Ollama
 
 # Same prompt as CP2 (scripts/cp2_build_testset.py), so training questions look like real search questions.
 SYSTEM = "You write realistic test questions for a search system over the US Federal Acquisition Regulation (FAR)."
@@ -139,7 +140,11 @@ def stage_train(epochs: int = 3, lr: float = 2e-5, batch_size: int = 32) -> None
     print(f"[train] {len(pairs)} pairs; epoch 0 (base) dev nDCG@10 {base:.4f}")
     for epoch in range(1, epochs + 1):
         t0 = time.time()
+        model.max_seq_length = TRAIN_MAX_TOKENS  # shorter passages for training: fits in GPU memory on 16 GB
         loss = train_epoch(model, pairs, optimizer, scheduler, BGE_QUERY_PREFIX, batch_size, seed=epoch)
+        model.max_seq_length = 512  # evaluate (and save) at the same length as the base model
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
         dev_ndcg = far_eval(retriever, corpus, items, cache=None)["dev"]["ndcg@10"]
         log.append({"epoch": epoch, "loss": round(loss, 4), "dev_ndcg@10": dev_ndcg})
         print(f"[train] epoch {epoch}: loss {loss:.4f}  dev nDCG@10 {dev_ndcg:.4f}  ({time.time() - t0:.0f}s)")
