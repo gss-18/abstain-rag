@@ -448,12 +448,12 @@ not depend on the judge. FAR test set (CP2):
 | Gate | Coverage | Refusal recall | Refusal precision | LLM seconds per query |
 |---|---|---|---|---|
 | 1 no gate | 0.67 | 0.70 | 0.99 | 14.7 |
-| 3 calibrated floor | 0.54 | 0.95 | 0.95 | 7.7 |
+| 3 calibrated floor | 0.53 | 0.94 | 0.95 | 7.7 |
 | 6 LLM self-refusal | 0.57 | 0.89 | 0.98 | 7.3 |
 | **3+6 floor, then LLM** | **0.52** | **0.97** | 0.94 | **5.4** |
 
 - Even with no gate the "always answer" model refuses 70% of unanswerable FAR questions on its own words;
-  the floor lifts that to 95% and **halves LLM time** because refused questions never reach the model.
+  the floor lifts that to 94% (91% from the floor alone, before any LLM call) and **halves LLM time** because refused questions never reach the model.
 - Stacking the floor and self-refusal refuses the most unanswerable questions (97%) at the lowest cost.
 - BEIR corpora show the same pattern (`runs/cp4/results.json`).
 
@@ -471,7 +471,8 @@ uv run python scripts/cp4_judge_check.py qwen2.5:14b   # re-test a judge against
 2. **Abstention gates and faithfulness are different problems.** Gates cut wrong answers to unanswerable
    questions and save compute; they do nothing for unsupported claims inside answers to good questions.
    That needs a stronger generator, citation checks, or claim-level verification.
-3. **A floor before generation is the cheapest win:** 95% refusal recall and half the LLM time.
+3. **A floor before generation is the cheapest win:** 91% of unanswerable questions refused before any LLM
+   call, and half the LLM time.
 
 ### Check yourself
 
