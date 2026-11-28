@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,7 @@ class Ollama:
         self.client = client or httpx.Client(timeout=timeout)
         self.cache_path = cache_path
         self._cache: dict[str, dict] = {}
+        self._lock = threading.Lock()  # generate() may be called from several threads
         if cache_path and cache_path.exists():
             with cache_path.open() as f:
                 for line in f:
@@ -66,8 +68,9 @@ class Ollama:
         if self.cache_path:
             row = {"key": key, "text": gen.text, "prompt_tokens": gen.prompt_tokens,
                    "output_tokens": gen.output_tokens, "seconds": gen.seconds}
-            self._cache[key] = row
-            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.cache_path.open("a") as f:
-                f.write(json.dumps(row) + "\n")
+            with self._lock:
+                self._cache[key] = row
+                self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+                with self.cache_path.open("a") as f:
+                    f.write(json.dumps(row) + "\n")
         return gen

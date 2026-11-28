@@ -27,3 +27,15 @@ def test_cache_avoids_second_call_and_survives_restart(tmp_path):
     Ollama("m", client=_client(calls), cache_path=cache).generate("p")
     again = Ollama("m", client=_client(calls), cache_path=cache).generate("p")
     assert again.cached and len(calls) == 1
+
+
+def test_parallel_generate_writes_every_row_once(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    calls = []
+    cache = tmp_path / "c.jsonl"
+    llm = Ollama("m", client=_client(calls), cache_path=cache)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        list(pool.map(lambda i: llm.generate(f"p{i}"), range(30)))
+    lines = cache.read_text().splitlines()
+    assert len(lines) == 30 and len({json.loads(x)["key"] for x in lines}) == 30
